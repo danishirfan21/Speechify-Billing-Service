@@ -1,0 +1,1 @@
+-- Add promotional codes migration

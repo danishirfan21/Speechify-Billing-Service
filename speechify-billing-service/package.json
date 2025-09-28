@@ -1,0 +1,17 @@
+{
+  "name": "speechify-billing-service",
+  "version": "1.0.0",
+  "description": "Speechify Billing Service - Node.js, TypeScript, Stripe, Knex, Docker",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev src/server.ts",
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint . --ext .ts,.tsx",
+    "migrate": "knex migrate:latest --knexfile knexfile.ts",
+    "seed": "knex seed:run --knexfile knexfile.ts"
+  },
+  "author": "",
+  "license": "MIT"
+}
