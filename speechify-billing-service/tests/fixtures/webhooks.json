@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "id": "evt_test123",
+    "type": "customer.subscription.created",
+    "data": {
+      "object": {
+        "id": "sub_test123",
+        "customer": "cus_test123",
+        "status": "active"
+      }
+    },
+    "created": 1704067200
+  }
+]
