@@ -6,10 +6,14 @@ import { emailService } from './email.service';
 import { logger } from '../utils/logger';
 import { WebhookEvent, StripeWebhookEvent } from '../types';
 
+interface WebhookDatabase {
+  (table: string): any;
+}
+
 export class WebhookService {
   private db = getDatabase();
 
-  constructor(database: any) {
+  constructor(database: WebhookDatabase) {
     this.db = database;
   }
 
@@ -181,7 +185,7 @@ export class WebhookService {
 
   private async handleSubscriptionUpdated(event: Stripe.Event): Promise<void> {
     const subscription = event.data.object as Stripe.Subscription;
-    const previousAttributes = event.data.previous_attributes as any;
+  const previousAttributes = event.data.previous_attributes as Record<string, unknown>;
 
     try {
       const dbSubscription = await this.db('subscriptions')
@@ -292,11 +296,11 @@ export class WebhookService {
               )?.id
             : undefined,
           invoice_number: invoice.number,
-          status: invoice.status as any,
+          status: String(invoice.status),
           amount_due: invoice.amount_due / 100,
           amount_paid: invoice.amount_paid / 100,
           amount_remaining: invoice.amount_remaining / 100,
-          currency: invoice.currency as any,
+          currency: String(invoice.currency),
           due_date: invoice.due_date ? new Date(invoice.due_date * 1000) : undefined,
           hosted_invoice_url: invoice.hosted_invoice_url,
           invoice_pdf_url: invoice.invoice_pdf,
@@ -607,7 +611,7 @@ export class WebhookService {
   }
 
   // Get webhook processing status and statistics
-  async getWebhookStatus(hoursBack: number = 24): Promise<any> {
+  async getWebhookStatus(hoursBack: number = 24): Promise<Record<string, unknown>> {
     try {
       const startTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
 
@@ -702,7 +706,7 @@ export class WebhookService {
     processed?: boolean;
     startDate?: Date;
     endDate?: Date;
-  }): Promise<any> {
+  }): Promise<Record<string, unknown>> {
     try {
       const { page, limit, eventType, processed, startDate, endDate } = options;
       const offset = (page - 1) * limit;
@@ -761,7 +765,7 @@ export class WebhookService {
   }
 
   // Replay a specific webhook event
-  async replayWebhookEvent(eventId: string): Promise<any> {
+  async replayWebhookEvent(eventId: string): Promise<Record<string, unknown>> {
     try {
       // Try to find by Stripe event ID first, then by internal ID
       let webhookEvent = await this.db('webhook_events').where('stripe_event_id', eventId).first();
@@ -821,7 +825,7 @@ export class WebhookService {
   }
 
   // Enhanced retry failed webhooks with better error handling
-  async retryFailedWebhooks(): Promise<any> {
+  async retryFailedWebhooks(): Promise<Record<string, unknown>> {
     try {
       const failedEvents = await this.db('webhook_events')
         .where('processed', false)
@@ -871,7 +875,7 @@ export class WebhookService {
   }
 
   // Webhook event data processing helpers
-  private truncateEventData(data: any): any {
+  private truncateEventData(data: Record<string, unknown>): Record<string, unknown> {
     try {
       const parsed = typeof data === 'string' ? JSON.parse(data) : data;
 
@@ -890,7 +894,7 @@ export class WebhookService {
   }
 
   // Abstract method placeholders (these should be implemented in the main WebhookService)
-  private async handleEvent(event: any): Promise<void> {
+  private async handleEvent(event: WebhookEvent): Promise<void> {
     // This method should be implemented in the main WebhookService class
     throw new Error('handleEvent method must be implemented');
   }
@@ -903,7 +907,7 @@ export class WebhookService {
   }
 
   // Webhook metrics collection
-  async getWebhookMetrics(timeframe: 'hour' | 'day' | 'week' = 'day'): Promise<any> {
+  async getWebhookMetrics(timeframe: 'hour' | 'day' | 'week' = 'day'): Promise<Record<string, unknown>> {
     try {
       let timeInterval: string;
       let startTime: Date;
@@ -974,7 +978,7 @@ export class WebhookService {
   }
 
   // Webhook event cleanup
-  async cleanupOldWebhookEvents(daysToKeep: number = 90): Promise<any> {
+  async cleanupOldWebhookEvents(daysToKeep: number = 90): Promise<Record<string, unknown>> {
     try {
       const cutoffDate = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000);
 
@@ -1014,7 +1018,7 @@ export class WebhookService {
   }
 
   // Webhook performance monitoring
-  async getWebhookPerformanceStats(): Promise<any> {
+  async getWebhookPerformanceStats(): Promise<Record<string, unknown>> {
     try {
       const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1039,7 +1043,7 @@ export class WebhookService {
     }
   }
 
-  private async getStatsForPeriod(startDate: Date): Promise<any> {
+  private async getStatsForPeriod(startDate: Date): Promise<Record<string, unknown>> {
     const stats = await this.db('webhook_events')
       .select(
         this.db.raw('COUNT(*) as total'),
@@ -1102,7 +1106,7 @@ export class WebhookService {
     }));
   }
 
-  private generatePerformanceRecommendations(stats: any, failedTypes: any[]): string[] {
+  private generatePerformanceRecommendations(stats: Record<string, unknown>, failedTypes: string[]): string[] {
     const recommendations: string[] = [];
 
     if (stats.failure_rate > 10) {

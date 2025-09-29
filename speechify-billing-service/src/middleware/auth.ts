@@ -83,7 +83,13 @@ export const authenticateJWT = async (
       throw new Error('JWT_SECRET not configured');
     }
 
-    const decoded = jwt.verify(token, jwtSecret) as any;
+    interface JwtPayload {
+      customerId: string;
+      email?: string;
+      iat?: number;
+      exp?: number;
+    }
+    const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
     // Fetch user details from database
     const db = getDatabase();
@@ -149,8 +155,16 @@ export const authenticateAdmin = async (
     const credentials = Buffer.from(authHeader.split(' ')[1], 'base64').toString('ascii');
     const [username, password] = credentials.split(':');
 
-    const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+    const adminUsername = process.env.ADMIN_USERNAME;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminUsername || !adminPassword) {
+      logger.error('Admin credentials are not set in environment variables.');
+      res.status(500).json({
+        success: false,
+        message: 'Server misconfiguration: admin credentials missing',
+      });
+      return;
+    }
 
     if (username !== adminUsername || password !== adminPassword) {
       res.status(401).json({
@@ -208,7 +222,7 @@ export const verifyRefreshToken = (token: string): { customerId: string } => {
     throw new Error('JWT_SECRET not configured');
   }
 
-  const decoded = jwt.verify(token, jwtSecret) as any;
+  const decoded = jwt.verify(token, jwtSecret) as JwtPayload;
 
   if (decoded.type !== 'refresh') {
     throw new Error('Invalid token type');

@@ -285,7 +285,7 @@ export const validateBillingInterval = (interval: string): { valid: boolean; err
 };
 
 // Metadata validation
-export const validateMetadata = (metadata: any): { valid: boolean; error?: string } => {
+export const validateMetadata = (metadata: Record<string, unknown>): { valid: boolean; error?: string } => {
   if (!metadata) {
     return { valid: true }; // Metadata is optional
   }
@@ -354,7 +354,7 @@ export const validateTrialDays = (days: number): { valid: boolean; error?: strin
 };
 
 // Composite validator for customer data
-export const validateCustomerData = (data: any): { valid: boolean; errors: string[] } => {
+export const validateCustomerData = (data: Record<string, unknown>): { valid: boolean; errors: string[] } => {
   const errors: string[] = [];
 
   const emailValidation = validateEmail(data.email);

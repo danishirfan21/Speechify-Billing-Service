@@ -240,9 +240,10 @@ export async function seed(knex: Knex): Promise<void> {
 
   await knex('subscription_plans').insert(plans);
 
-  console.log('✅ Subscription plans seeded successfully');
-  console.log(`   📋 Created ${plans.length} subscription plans`);
-  console.log('   💰 Currencies: USD, EUR, GBP');
-  console.log('   📅 Intervals: Monthly, Yearly');
-  console.log('   🎯 Tiers: Free, Premium, Pro');
+  const { logger } = require('../../src/utils/logger');
+  logger.info('✅ Subscription plans seeded successfully');
+  logger.info(`   📋 Created ${plans.length} subscription plans`);
+  logger.info('   💰 Currencies: USD, EUR, GBP');
+  logger.info('   📅 Intervals: Monthly, Yearly');
+  logger.info('   🎯 Tiers: Free, Premium, Pro');
 }

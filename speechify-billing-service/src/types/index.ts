@@ -245,8 +245,8 @@ export interface StripeWebhookEvent {
   id: string;
   type: string;
   data: {
-    object: any;
-    previous_attributes?: any;
+  object: Record<string, unknown>;
+  previous_attributes?: Record<string, unknown>;
   };
   created: number;
   livemode: boolean;
