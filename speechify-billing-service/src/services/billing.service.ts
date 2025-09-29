@@ -1222,6 +1222,369 @@ export class BillingService {
       throw error;
     }
   }
+
+  async getInvoice(invoiceId: string): Promise<Invoice | null> {
+    try {
+      const invoice = await this.db('invoices').where('id', invoiceId).first();
+      return invoice || null;
+    } catch (error) {
+      logger.error('Failed to get invoice:', error);
+      throw error;
+    }
+  }
+
+  async getPaymentMethod(paymentMethodId: string): Promise<PaymentMethod | null> {
+    try {
+      const paymentMethod = await this.db('payment_methods').where('id', paymentMethodId).first();
+      return paymentMethod || null;
+    } catch (error) {
+      logger.error('Failed to get payment method:', error);
+      throw error;
+    }
+  }
+
+  async updateDefaultPaymentMethod(customerId: string, paymentMethodId: string): Promise<void> {
+    const trx = await this.db.transaction();
+
+    try {
+      // Set all payment methods to non-default
+      await trx('payment_methods').where('customer_id', customerId).update({ is_default: false });
+
+      // Set the specified payment method as default
+      await trx('payment_methods')
+        .where('id', paymentMethodId)
+        .update({ is_default: true, updated_at: new Date() });
+
+      await trx.commit();
+      logger.info(`Default payment method updated for customer: ${customerId}`);
+    } catch (error) {
+      await trx.rollback();
+      logger.error('Failed to update default payment method:', error);
+      throw error;
+    }
+  }
+
+  async exportSubscriptions(options: {
+    format: string;
+    startDate?: Date;
+    endDate?: Date;
+    status?: string;
+  }): Promise<any> {
+    try {
+      let query = this.db('subscriptions as s')
+        .join('customers as c', 's.customer_id', 'c.id')
+        .join('subscription_plans as sp', 's.plan_id', 'sp.id')
+        .select(
+          'c.email',
+          'c.name',
+          'c.company',
+          'sp.name as plan_name',
+          'sp.amount',
+          's.status',
+          's.created_at',
+          's.current_period_start',
+          's.current_period_end',
+        );
+
+      if (options.startDate) {
+        query = query.where('s.created_at', '>=', options.startDate);
+      }
+
+      if (options.endDate) {
+        query = query.where('s.created_at', '<=', options.endDate);
+      }
+
+      if (options.status && options.status !== 'all') {
+        query = query.where('s.status', options.status);
+      }
+
+      const subscriptions = await query;
+
+      return {
+        data: subscriptions,
+        format: options.format,
+        filename: `subscriptions_export_${new Date().toISOString().split('T')[0]}.${
+          options.format
+        }`,
+      };
+    } catch (error) {
+      logger.error('Failed to export subscriptions:', error);
+      throw error;
+    }
+  }
+
+  async exportRevenue(options: {
+    format: string;
+    startDate?: Date;
+    endDate?: Date;
+    granularity: string;
+  }): Promise<any> {
+    try {
+      let dateFormat: string;
+      switch (options.granularity) {
+        case 'day':
+          dateFormat = 'DATE(paid_at)';
+          break;
+        case 'week':
+          dateFormat = "DATE_TRUNC('week', paid_at)::date";
+          break;
+        case 'month':
+          dateFormat = "DATE_TRUNC('month', paid_at)::date";
+          break;
+        default:
+          dateFormat = 'DATE(paid_at)';
+      }
+
+      let query = this.db('invoices')
+        .select(
+          this.db.raw(`${dateFormat} as period`),
+          this.db.raw('SUM(amount_paid) as revenue'),
+          this.db.raw('COUNT(*) as transactions'),
+          this.db.raw('COUNT(DISTINCT customer_id) as unique_customers'),
+        )
+        .where('status', 'paid')
+        .whereNotNull('paid_at')
+        .groupBy(this.db.raw(dateFormat))
+        .orderBy('period', 'asc');
+
+      if (options.startDate) {
+        query = query.where('paid_at', '>=', options.startDate);
+      }
+
+      if (options.endDate) {
+        query = query.where('paid_at', '<=', options.endDate);
+      }
+
+      const revenueData = await query;
+
+      return {
+        data: revenueData,
+        format: options.format,
+        filename: `revenue_export_${new Date().toISOString().split('T')[0]}.${options.format}`,
+      };
+    } catch (error) {
+      logger.error('Failed to export revenue:', error);
+      throw error;
+    }
+  }
+
+  async getMonthlyReport(reportDate: Date): Promise<any> {
+    try {
+      const startOfMonth = new Date(reportDate.getFullYear(), reportDate.getMonth(), 1);
+      const endOfMonth = new Date(reportDate.getFullYear(), reportDate.getMonth() + 1, 0);
+
+      const [revenue, newCustomers, newSubscriptions, churnedSubscriptions] = await Promise.all([
+        this.db('invoices')
+          .where('status', 'paid')
+          .whereBetween('paid_at', [startOfMonth, endOfMonth])
+          .sum('amount_paid as total')
+          .first(),
+
+        this.db('customers')
+          .whereBetween('created_at', [startOfMonth, endOfMonth])
+          .count('id as count')
+          .first(),
+
+        this.db('subscriptions')
+          .whereBetween('created_at', [startOfMonth, endOfMonth])
+          .count('id as count')
+          .first(),
+
+        this.db('subscriptions')
+          .where('status', 'canceled')
+          .whereBetween('canceled_at', [startOfMonth, endOfMonth])
+          .count('id as count')
+          .first(),
+      ]);
+
+      return {
+        month: reportDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
+        total_revenue: parseFloat(revenue?.total || '0'),
+        new_customers: parseInt(newCustomers?.count || '0'),
+        new_subscriptions: parseInt(newSubscriptions?.count || '0'),
+        churned_subscriptions: parseInt(churnedSubscriptions?.count || '0'),
+        report_date: reportDate,
+      };
+    } catch (error) {
+      logger.error('Failed to get monthly report:', error);
+      throw error;
+    }
+  }
+
+  async performDataCleanup(options: { dataTypes: string[]; olderThanDays: number }): Promise<any> {
+    const cutoffDate = new Date(Date.now() - options.olderThanDays * 24 * 60 * 60 * 1000);
+    const results: Record<string, number> = {};
+
+    try {
+      for (const dataType of options.dataTypes) {
+        switch (dataType) {
+          case 'usage_records':
+            results.usage_records = await this.db('usage_records')
+              .where('timestamp', '<', cutoffDate)
+              .delete();
+            break;
+
+          case 'webhook_events':
+            results.webhook_events = await this.db('webhook_events')
+              .where('created_at', '<', cutoffDate)
+              .where('processed', true)
+              .whereNull('error_message')
+              .delete();
+            break;
+
+          case 'failed_payments':
+            results.failed_payments = await this.db('failed_payments')
+              .where('created_at', '<', cutoffDate)
+              .where('resolved', true)
+              .delete();
+            break;
+
+          case 'logs':
+            // This would typically be a file system operation
+            results.logs = 0;
+            break;
+        }
+      }
+
+      return {
+        cleanup_date: new Date(),
+        cutoff_date: cutoffDate,
+        results,
+        total_deleted: Object.values(results).reduce((sum, count) => sum + count, 0),
+      };
+    } catch (error) {
+      logger.error('Failed to perform data cleanup:', error);
+      throw error;
+    }
+  }
+
+  async performStripeSync(options: { syncTypes: string[]; limit: number }): Promise<any> {
+    const results: Record<string, { synced: number; errors: number }> = {};
+
+    try {
+      for (const syncType of options.syncTypes) {
+        results[syncType] = { synced: 0, errors: 0 };
+
+        switch (syncType) {
+          case 'subscriptions':
+            const subscriptions = await this.db('subscriptions')
+              .whereIn('status', ['active', 'trialing', 'past_due'])
+              .limit(options.limit);
+
+            for (const sub of subscriptions) {
+              try {
+                const stripeSubscription = await stripeService.getSubscription(
+                  sub.stripe_subscription_id,
+                );
+
+                if (stripeSubscription.status !== sub.status) {
+                  await this.db('subscriptions').where('id', sub.id).update({
+                    status: stripeSubscription.status,
+                    updated_at: new Date(),
+                  });
+                  results[syncType].synced++;
+                }
+              } catch (error) {
+                results[syncType].errors++;
+                logger.error(`Failed to sync subscription ${sub.id}:`, error);
+              }
+            }
+            break;
+
+          // Add other sync types as needed
+        }
+      }
+
+      return {
+        sync_date: new Date(),
+        results,
+        total_synced: Object.values(results).reduce((sum, r) => sum + r.synced, 0),
+        total_errors: Object.values(results).reduce((sum, r) => sum + r.errors, 0),
+      };
+    } catch (error) {
+      logger.error('Failed to perform Stripe sync:', error);
+      throw error;
+    }
+  }
+
+  async sendBulkNotification(options: {
+    notificationType: string;
+    recipients: {
+      customer_ids?: string[];
+      plan_types?: string[];
+      all_customers?: boolean;
+    };
+    subject: string;
+    message: string;
+    scheduleAt?: Date;
+  }): Promise<any> {
+    try {
+      let query = this.db('customers').whereNull('deleted_at');
+
+      if (options.recipients.customer_ids && options.recipients.customer_ids.length > 0) {
+        query = query.whereIn('id', options.recipients.customer_ids);
+      } else if (options.recipients.plan_types && options.recipients.plan_types.length > 0) {
+        query = query
+          .join('subscriptions', 'customers.id', 'subscriptions.customer_id')
+          .join('subscription_plans', 'subscriptions.plan_id', 'subscription_plans.id')
+          .whereIn('subscription_plans.plan_type', options.recipients.plan_types)
+          .whereIn('subscriptions.status', ['active', 'trialing']);
+      }
+
+      const customers = await query.select('customers.id', 'customers.email', 'customers.name');
+
+      let sentCount = 0;
+      let failedCount = 0;
+
+      for (const customer of customers) {
+        try {
+          // Queue the notification (would typically use a job queue)
+          await emailService.sendEmail(customer.email, options.subject, options.message);
+          sentCount++;
+        } catch (error) {
+          failedCount++;
+          logger.error(`Failed to send notification to ${customer.email}:`, error);
+        }
+      }
+
+      return {
+        notification_type: options.notificationType,
+        total_recipients: customers.length,
+        sent: sentCount,
+        failed: failedCount,
+        scheduled_at: options.scheduleAt,
+      };
+    } catch (error) {
+      logger.error('Failed to send bulk notification:', error);
+      throw error;
+    }
+  }
+
+  async getAuditLogs(options: {
+    page: number;
+    limit: number;
+    actionType?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<any> {
+    try {
+      // This would typically be a separate audit_logs table
+      // For now, we can create a basic implementation
+
+      return {
+        logs: [],
+        pagination: {
+          page: options.page,
+          limit: options.limit,
+          total: 0,
+          totalPages: 0,
+        },
+      };
+    } catch (error) {
+      logger.error('Failed to get audit logs:', error);
+      throw error;
+    }
+  }
 }
 
 // Custom error class

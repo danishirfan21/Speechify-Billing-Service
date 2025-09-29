@@ -488,6 +488,216 @@ export class StripeService {
       return false;
     }
   }
+
+  // Payment Intent Methods
+  async createPaymentIntent(params: {
+    amount: number;
+    currency: string;
+    customer: string;
+    payment_method?: string;
+    description?: string;
+    metadata?: Record<string, any>;
+  }): Promise<Stripe.PaymentIntent> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.create({
+        amount: params.amount,
+        currency: params.currency,
+        customer: params.customer,
+        payment_method: params.payment_method,
+        description: params.description,
+        metadata: params.metadata,
+        automatic_payment_methods: params.payment_method ? undefined : { enabled: true },
+      });
+
+      logger.info(`Payment intent created: ${paymentIntent.id}`);
+      return paymentIntent;
+    } catch (error) {
+      logger.error('Failed to create payment intent:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  async confirmPaymentIntent(
+    paymentIntentId: string,
+    options?: {
+      payment_method?: string;
+      return_url?: string;
+    },
+  ): Promise<Stripe.PaymentIntent> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.confirm(paymentIntentId, options);
+      logger.info(`Payment intent confirmed: ${paymentIntent.id}`);
+      return paymentIntent;
+    } catch (error) {
+      logger.error('Failed to confirm payment intent:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  async retryPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+
+      if (paymentIntent.status === 'requires_payment_method') {
+        // Re-attempt the payment
+        return await this.stripe.paymentIntents.confirm(paymentIntentId);
+      }
+
+      return paymentIntent;
+    } catch (error) {
+      logger.error('Failed to retry payment intent:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  async listPaymentIntents(params: {
+    customer?: string;
+    limit?: number;
+    starting_after?: string;
+  }): Promise<Stripe.ApiList<Stripe.PaymentIntent>> {
+    try {
+      return await this.stripe.paymentIntents.list(params);
+    } catch (error) {
+      logger.error('Failed to list payment intents:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Setup Intent Methods
+  async createSetupIntent(
+    customerId: string,
+    usage: 'on_session' | 'off_session' = 'off_session',
+  ): Promise<Stripe.SetupIntent> {
+    try {
+      const setupIntent = await this.stripe.setupIntents.create({
+        customer: customerId,
+        usage,
+        payment_method_types: ['card'],
+      });
+
+      logger.info(`Setup intent created: ${setupIntent.id}`);
+      return setupIntent;
+    } catch (error) {
+      logger.error('Failed to create setup intent:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Refund Methods
+  async createRefund(params: {
+    payment_intent: string;
+    amount?: number;
+    reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer' | 'expired_uncaptured_charge';
+    metadata?: Record<string, any>;
+  }): Promise<Stripe.Refund> {
+    try {
+      const refund = await this.stripe.refunds.create(params);
+      logger.info(`Refund created: ${refund.id}`);
+      return refund;
+    } catch (error) {
+      logger.error('Failed to create refund:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Tax Rate Methods
+  async getTaxRates(params?: { country?: string; state?: string }): Promise<Stripe.TaxRate[]> {
+    try {
+      const taxRates = await this.stripe.taxRates.list({
+        active: true,
+        limit: 100,
+      });
+      return taxRates.data;
+    } catch (error) {
+      logger.error('Failed to get tax rates:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Invoice Preview Methods
+  async getUpcomingInvoice(customerId: string, subscriptionId?: string): Promise<Stripe.Invoice> {
+    try {
+      const params: Stripe.InvoiceRetrieveUpcomingParams = {
+        customer: customerId,
+      };
+
+      if (subscriptionId) {
+        params.subscription = subscriptionId;
+      }
+
+      return await this.stripe.invoices.retrieveUpcoming(params);
+    } catch (error) {
+      logger.error('Failed to get upcoming invoice:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  async previewSubscription(params: {
+    customer: string;
+    items: Array<{ price: string; quantity?: number }>;
+    coupon?: string;
+    trial_period_days?: number;
+  }): Promise<Stripe.Invoice> {
+    try {
+      return await this.stripe.invoices.retrieveUpcoming({
+        customer: params.customer,
+        subscription_items: params.items,
+        coupon: params.coupon,
+        subscription_trial_end: params.trial_period_days
+          ? Math.floor(Date.now() / 1000) + params.trial_period_days * 24 * 60 * 60
+          : undefined,
+      });
+    } catch (error) {
+      logger.error('Failed to preview subscription:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Customer Balance Methods
+  async getCustomerBalance(customerId: string): Promise<number> {
+    try {
+      const customer = await this.stripe.customers.retrieve(customerId);
+      if (customer.deleted) {
+        throw new Error('Customer has been deleted');
+      }
+      return customer.balance;
+    } catch (error) {
+      logger.error('Failed to get customer balance:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  // Promotional Code Methods
+  async getPromotionalCode(promoCode: string): Promise<Stripe.PromotionCode | null> {
+    try {
+      const promoCodes = await this.stripe.promotionCodes.list({
+        code: promoCode,
+        active: true,
+        limit: 1,
+      });
+
+      return promoCodes.data[0] || null;
+    } catch (error) {
+      logger.error('Failed to get promotional code:', error);
+      throw this.handleStripeError(error);
+    }
+  }
+
+  async createPromotionCode(params: {
+    coupon: string;
+    code: string;
+    max_redemptions?: number;
+    expires_at?: number;
+  }): Promise<Stripe.PromotionCode> {
+    try {
+      const promoCode = await this.stripe.promotionCodes.create(params);
+      logger.info(`Promotion code created: ${promoCode.id}`);
+      return promoCode;
+    } catch (error) {
+      logger.error('Failed to create promotion code:', error);
+      throw this.handleStripeError(error);
+    }
+  }
 }
 
 export const stripeService = new StripeService();
